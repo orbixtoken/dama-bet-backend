@@ -14,56 +14,64 @@ const s = (v) => (v ?? '').toString().trim();
 
 /* =========================================================
  * POST /api/auth/signup
- * body: { nome, email, senha }
+ * body: { nome, usuario, senha }
  * resp: { accessToken, refreshToken, usuario, ... }
  * - cria usuário ativo com funcao 'USER' (nunca ADMIN)
- * - garante unicidade de email/usuario
+ * - garante unicidade de usuario
  * - cria registro em saldos (0)
  * =======================================================*/
 export const signupUsuario = async (req, res) => {
-  const nome  = s(req.body?.nome);
-  const email = s(req.body?.email).toLowerCase();
+  const nome = s(req.body?.nome);
+  const rawUsuario = s(req.body?.usuario).toLowerCase();
   const senha = s(req.body?.senha);
 
-  if (!nome || !email || !senha) {
-    return res.status(400).json({ erro: 'Nome, e-mail e senha são obrigatórios.' });
-  }
-  // validação simples de e-mail
-  if (!/\S+@\S+\.\S+/.test(email)) {
-    return res.status(400).json({ erro: 'E-mail inválido.' });
-  }
-  if (senha.length < 6) {
-    return res.status(400).json({ erro: 'A senha deve ter pelo menos 6 caracteres.' });
+  if (!nome || !rawUsuario || !senha) {
+    return res
+      .status(400)
+      .json({ erro: 'Nome, usuário e senha são obrigatórios.' });
   }
 
-  // vamos usar o próprio e-mail como "usuario" de login
-  const usuario = email;
+  // aqui seguimos o padrão que você vem usando: usuario É um e-mail,
+  // só que armazenado na coluna "usuario"
+  if (!/\S+@\S+\.\S+/.test(rawUsuario)) {
+    return res
+      .status(400)
+      .json({ erro: 'Usuário deve ser um e-mail válido.' });
+  }
+
+  if (senha.length < 6) {
+    return res
+      .status(400)
+      .json({ erro: 'A senha deve ter pelo menos 6 caracteres.' });
+  }
+
+  const usuario = rawUsuario;
 
   try {
     await db.query('BEGIN');
 
-    // 1) checa duplicidade de email/usuario
+    // 1) checa duplicidade de usuario (case-insensitive)
     const { rows: dup } = await db.query(
       `SELECT id FROM public.usuarios
-        WHERE LOWER(email) = $1 OR LOWER(usuario) = $1
+        WHERE LOWER(usuario) = $1
         LIMIT 1`,
-      [email]
+      [usuario]
     );
     if (dup.length) {
       await db.query('ROLLBACK');
-      return res.status(409).json({ erro: 'E-mail já cadastrado.' });
+      return res.status(409).json({ erro: 'Usuário já cadastrado.' });
     }
 
     // 2) hash da senha
     const senha_hash = await bcrypt.hash(senha, 10);
 
-    // 3) cria usuário (sempre USER e ativo)
+    // 3) cria usuário (sempre USER e ativo) – sem coluna email
     const { rows: urows } = await db.query(
       `INSERT INTO public.usuarios
-         (usuario, nome, email, funcao, senha_hash, ativo, criado_em)
-       VALUES ($1, $2, $3, 'USER', $4, TRUE, NOW())
-       RETURNING id, usuario, nome, email, funcao, ativo`,
-      [usuario, nome, email, senha_hash]
+         (usuario, nome, funcao, senha_hash, ativo, criado_em)
+       VALUES ($1, $2, 'USER', $3, TRUE, NOW())
+       RETURNING id, usuario, nome, funcao, ativo`,
+      [usuario, nome, senha_hash]
     );
     const user = urows[0];
 
@@ -112,12 +120,14 @@ export const signupUsuario = async (req, res) => {
         nome: user.nome,
         usuario: user.usuario,
         funcao: user.funcao, // USER
-        email: user.email,
+        email: null, // mantemos campo para compat, mas sempre null (não há coluna)
         ativo: user.ativo,
       },
     });
   } catch (error) {
-    try { await db.query('ROLLBACK'); } catch {}
+    try {
+      await db.query('ROLLBACK');
+    } catch {}
     console.error('Erro no signup:', error);
     return res.status(500).json({ erro: 'Erro interno ao criar conta.' });
   }
@@ -137,42 +147,25 @@ export const loginUsuario = async (req, res) => {
   }
 
   try {
-    let result;
-
-    if (rawUsuario.includes('@')) {
-      try {
-        result = await db.query(
-          `SELECT id, usuario, nome, funcao, senha_hash, cpf, telefone, ativo, email
-             FROM usuarios
-            WHERE LOWER(email) = $1 AND ativo = true
-            LIMIT 1`,
-          [rawUsuario]
-        );
-      } catch {
-        result = await db.query(
-          `SELECT id, usuario, nome, funcao, senha_hash, cpf, telefone, ativo
-             FROM usuarios
-            WHERE usuario = $1 AND ativo = true
-            LIMIT 1`,
-          [rawUsuario]
-        );
-      }
-    } else {
-      result = await db.query(
-        `SELECT id, usuario, nome, funcao, senha_hash, cpf, telefone, ativo, email
-           FROM usuarios
-          WHERE usuario = $1 AND ativo = true
-          LIMIT 1`,
-        [rawUsuario]
-      );
-    }
+    // Busca APENAS por usuario (coluna "usuario"), sem usar coluna email
+    const result = await db.query(
+      `SELECT id, usuario, nome, funcao, senha_hash, cpf, telefone, ativo
+         FROM usuarios
+        WHERE LOWER(usuario) = $1
+          AND ativo = true
+        LIMIT 1`,
+      [rawUsuario]
+    );
 
     if (result.rows.length === 0) {
       return res.status(401).json({ erro: 'Credenciais inválidas.' });
     }
 
     const user = result.rows[0];
-    const senhaValida = await bcrypt.compare(senha, String(user.senha_hash || ''));
+    const senhaValida = await bcrypt.compare(
+      senha,
+      String(user.senha_hash || '')
+    );
     if (!senhaValida) {
       return res.status(401).json({ erro: 'Credenciais inválidas.' });
     }
@@ -214,7 +207,7 @@ export const loginUsuario = async (req, res) => {
         funcao: user.funcao,
         cpf: user.cpf,
         telefone: user.telefone,
-        email: user.email ?? null,
+        email: null, // não temos coluna email, devolvemos null por padrão
       },
     });
   } catch (error) {
@@ -249,13 +242,17 @@ export const refreshToken = async (req, res) => {
     );
     const tokenRow = rows[0];
     if (!tokenRow) {
-      return res.status(401).json({ erro: 'Refresh token inválido ou revogado.' });
+      return res
+        .status(401)
+        .json({ erro: 'Refresh token inválido ou revogado.' });
     }
 
     const newRefresh = generateRefreshToken({ id: userId });
     const newHashed = hashToken(newRefresh);
     const newDecoded = decode(newRefresh);
-    const newExpires = newDecoded?.exp ? new Date(newDecoded.exp * 1000) : null;
+    const newExpires = newDecoded?.exp
+      ? new Date(newDecoded.exp * 1000)
+      : null;
 
     const uaRaw = req.headers['user-agent'] || null;
     const userAgent = typeof uaRaw === 'string' ? uaRaw.slice(0, 255) : null;
@@ -304,9 +301,13 @@ export const refreshToken = async (req, res) => {
       refresh_token: newRefresh,
     });
   } catch (error) {
-    try { await db.query('ROLLBACK'); } catch {}
+    try {
+      await db.query('ROLLBACK');
+    } catch {}
     console.error('Erro no refresh:', error);
-    return res.status(401).json({ erro: 'Refresh token inválido ou expirado.' });
+    return res
+      .status(401)
+      .json({ erro: 'Refresh token inválido ou expirado.' });
   }
 };
 
@@ -359,6 +360,8 @@ export const logoutAll = async (req, res) => {
     return res.json({ mensagem: 'Todas as sessões foram encerradas.' });
   } catch (error) {
     console.error('Erro no logout-all:', error);
-    return res.status(500).json({ erro: 'Erro interno ao encerrar sessões.' });
+    return res
+      .status(500)
+      .json({ erro: 'Erro interno ao encerrar sessões.' });
   }
 };

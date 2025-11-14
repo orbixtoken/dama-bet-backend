@@ -1,7 +1,7 @@
 // src/routes/auth.routes.js
 import { Router } from 'express';
 import {
-  signupUsuario,   // <= novo
+  signupUsuario,
   loginUsuario,
   refreshToken,
   logout,
@@ -9,14 +9,17 @@ import {
 } from '../controllers/auth.controller.js';
 import { autenticarToken } from '../middlewares/auth.middleware.js';
 import { loginLimiter } from '../utils/rateLimiter.js';
-import db from '../models/db.js'; // para o check-email
+import db from '../models/db.js';
 
 const router = Router();
 
 /** Helper de validação de campos obrigatórios no body */
 const requireBody = (fields = []) => (req, res, next) => {
   const faltando = fields.filter(
-    (f) => req.body[f] === undefined || req.body[f] === null || req.body[f] === ''
+    (f) =>
+      req.body[f] === undefined ||
+      req.body[f] === null ||
+      req.body[f] === ''
   );
   if (faltando.length) {
     return res.status(400).json({
@@ -30,7 +33,7 @@ const requireBody = (fields = []) => (req, res, next) => {
  * @openapi
  * /api/auth/check-email:
  *   get:
- *     summary: Verifica se um e-mail já está cadastrado (para UX no signup)
+ *     summary: Verifica se um usuário (e-mail de login) já está cadastrado
  *     tags: [Auth]
  *     parameters:
  *       - in: query
@@ -38,7 +41,7 @@ const requireBody = (fields = []) => (req, res, next) => {
  *         required: true
  *         schema:
  *           type: string
- *         description: E-mail a verificar
+ *         description: E-mail de login a verificar (usado como "usuario")
  *     responses:
  *       200:
  *         description: OK
@@ -46,19 +49,33 @@ const requireBody = (fields = []) => (req, res, next) => {
  *         description: Query param ausente/ inválido
  */
 router.get('/check-email', async (req, res) => {
-  const emailRaw = (req.query?.email || '').toString().trim().toLowerCase();
-  if (!emailRaw || !/\S+@\S+\.\S+/.test(emailRaw)) {
+  // Aceita ?email= ou ?usuario= mas trata tudo como "usuario" (coluna unica)
+  const usuarioRaw = (
+    req.query?.email ||
+    req.query?.usuario ||
+    ''
+  )
+    .toString()
+    .trim()
+    .toLowerCase();
+
+  if (!usuarioRaw || !/\S+@\S+\.\S+/.test(usuarioRaw)) {
     return res.status(400).json({ erro: 'Parâmetro "email" inválido.' });
   }
+
   try {
     const { rows } = await db.query(
-      `SELECT 1 FROM public.usuarios WHERE LOWER(email) = $1 OR LOWER(usuario) = $1 LIMIT 1`,
-      [emailRaw]
+      `SELECT 1
+         FROM public.usuarios
+        WHERE LOWER(usuario) = $1
+        LIMIT 1`,
+      [usuarioRaw]
     );
     return res.json({ available: rows.length === 0 });
   } catch (e) {
     console.error('check-email erro:', e);
-    return res.status(200).json({ available: true }); // não travar UX se der erro
+    // Em caso de erro, não travar UX: assume disponível
+    return res.status(200).json({ available: true });
   }
 });
 
@@ -74,20 +91,31 @@ router.get('/check-email', async (req, res) => {
  *         application/json:
  *           schema:
  *             type: object
- *             required: [nome, email, senha]
+ *             required: [nome, usuario, senha]
  *             properties:
- *               nome:  { type: string, example: "Maria Souza" }
- *               email: { type: string, example: "maria@exemplo.com" }
- *               senha: { type: string, example: "minhaSenha123" }
+ *               nome:
+ *                 type: string
+ *                 example: "Maria Souza"
+ *               usuario:
+ *                 type: string
+ *                 example: "maria@exemplo.com"
+ *                 description: E-mail usado como usuário de login
+ *               senha:
+ *                 type: string
+ *                 example: "minhaSenha123"
  *     responses:
  *       201:
  *         description: Conta criada
  *       400:
  *         description: Body inválido
  *       409:
- *         description: E-mail já cadastrado
+ *         description: Usuário já cadastrado
  */
-router.post('/signup', requireBody(['nome', 'email', 'senha']), signupUsuario);
+router.post(
+  '/signup',
+  requireBody(['nome', 'usuario', 'senha']),
+  signupUsuario
+);
 
 /**
  * @openapi
@@ -111,7 +139,12 @@ router.post('/signup', requireBody(['nome', 'email', 'senha']), signupUsuario);
  *       429:
  *         description: Muitas tentativas de login
  */
-router.post('/login', loginLimiter, requireBody(['usuario', 'senha']), loginUsuario);
+router.post(
+  '/login',
+  loginLimiter,
+  requireBody(['usuario', 'senha']),
+  loginUsuario
+);
 
 /**
  * @openapi
