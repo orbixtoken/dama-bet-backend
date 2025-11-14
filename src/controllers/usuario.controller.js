@@ -1,5 +1,5 @@
 // src/controllers/usuario.controller.js
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import db from '../models/db.js';
 
 // ========================

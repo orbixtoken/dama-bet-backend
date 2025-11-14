@@ -1,6 +1,6 @@
 // src/controllers/resetSenhaController.js
 import db from '../models/db.js';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 
 /**
  * PUT /api/reset-senha

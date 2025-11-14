@@ -1,5 +1,5 @@
 // src/controllers/auth.controller.js
-import bcrypt from 'bcrypt'; // ou 'bcryptjs'
+import bcrypt from 'bcryptjs'; // ou 'bcryptjs'
 import db from '../models/db.js';
 import {
   generateAccessToken,
