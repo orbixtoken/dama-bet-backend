@@ -1,4 +1,4 @@
-// src/models/db.js  (ajuste o caminho se seu projeto usa "models/db.js")
+// src/models/db.js
 import pg from 'pg';
 import dotenv from 'dotenv';
 
@@ -20,20 +20,30 @@ const {
   DB_CONN_TIMEOUT_MS = '5000',
 } = process.env;
 
+// Se DB_SSL=true nas envs, força SSL
 const useSSL = String(DB_SSL).toLowerCase() === 'true';
 
-/** Permite usar DATABASE_URL (Render/Heroku) ou variáveis soltas (.env local) */
+// Heurística: se a URL tem sslmode=require (Neon/Heroku) ou domínio neon.tech, força SSL
+const neonWantsSSL =
+  (DATABASE_URL && /sslmode=require/i.test(DATABASE_URL)) ||
+  (DATABASE_URL && /neon\.tech/i.test(DATABASE_URL));
+
+/**
+ * Permite usar:
+ *  - DATABASE_URL (Render/Heroku/Neon)
+ *  - OU variáveis soltas (DB_HOST/DB_USER/DB_PASSWORD/DB_NAME)
+ */
 const baseConfig = DATABASE_URL
   ? {
       connectionString: DATABASE_URL,
-      ssl: useSSL ? { rejectUnauthorized: false } : false,
+      ssl: (useSSL || neonWantsSSL) ? { rejectUnauthorized: false } : false,
     }
   : {
       host: DB_HOST,
       port: parseInt(DB_PORT, 10),
       user: DB_USER,
       password: DB_PASSWORD,
-      database: DB_NAME, // ex.: "damabet"
+      database: DB_NAME,
       ssl: useSSL ? { rejectUnauthorized: false } : false,
     };
 
@@ -45,7 +55,9 @@ const pool = new Pool({
   application_name: 'dama-bet-backend',
 });
 
-/* Logs simples (evita vazar credenciais) */
+/* ------------------------------------------------------------------ */
+/* Logs resumidos (evita vazar credenciais)                            */
+/* ------------------------------------------------------------------ */
 pool.on('connect', async () => {
   if (NODE_ENV !== 'production') {
     console.log('✅ Pool PostgreSQL ativo.');
@@ -62,13 +74,9 @@ pool.on('error', (err) => {
   console.error('❌ Erro no pool do PostgreSQL:', err);
 });
 
-/* ---- Export em formato compatível ----
-   - default: objeto com .query, .connect e .pool
-   Assim, controllers podem fazer:
-     import db from '../models/db.js'
-     const client = await db.connect();  // transações
-     await db.query('SQL', [params]);    // consultas simples
-*/
+/* ------------------------------------------------------------------ */
+/* Exports                                                             */
+/* ------------------------------------------------------------------ */
 const db = {
   pool,
   query: (text, params) => pool.query(text, params),
@@ -77,10 +85,9 @@ const db = {
 
 export default db;
 
-/* ---- Exports nomeados úteis ---- */
 export const query = (text, params) => pool.query(text, params);
 
-/** Helper para transações (evita boilerplate de BEGIN/COMMIT/ROLLBACK) */
+/** Helper para transações: passa um client já dentro de BEGIN */
 export async function withTransaction(fn) {
   const client = await pool.connect();
   try {
