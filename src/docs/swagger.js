@@ -2,9 +2,23 @@
 import swaggerJSDoc from 'swagger-jsdoc';
 
 const PORT = process.env.PORT || 3001;
-// Permite definir a URL do servidor via env (útil em staging/prod)
-const SERVER_URL =
-  process.env.SWAGGER_SERVER_URL || `http://localhost:${PORT}`;
+
+/**
+ * Monta dinamicamente a lista de servidores do Swagger.
+ * Ordem de preferência:
+ * 1) SWAGGER_SERVER_URL (você define manualmente)
+ * 2) RENDER_EXTERNAL_HOSTNAME (Render injeta isso no container)
+ * 3) localhost (sempre disponível para dev)
+ */
+const servers = [];
+if (process.env.SWAGGER_SERVER_URL) {
+  servers.push({ url: process.env.SWAGGER_SERVER_URL });
+}
+if (process.env.RENDER_EXTERNAL_HOSTNAME) {
+  servers.push({ url: `https://${process.env.RENDER_EXTERNAL_HOSTNAME}` });
+}
+// sempre deixa localhost por último (útil em dev)
+servers.push({ url: `http://localhost:${PORT}` });
 
 const options = {
   definition: {
@@ -15,8 +29,7 @@ const options = {
       description:
         'API de autenticação, apostas, financeiro, saques e rotas administrativas do Arguz Bets.',
     },
-    servers: [{ url: SERVER_URL }],
-    // Aplica Bearer globalmente (rotas públicas podem sobrescrever e remover)
+    servers,                         // <— usa a lista acima
     security: [{ bearerAuth: [] }],
     tags: [
       { name: 'Auth', description: 'Login, refresh, logout' },
@@ -32,7 +45,6 @@ const options = {
         bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
       },
       schemas: {
-        // ===== Auth =====
         LoginRequest: {
           type: 'object',
           required: ['usuario', 'senha'],
@@ -60,19 +72,13 @@ const options = {
         RefreshRequest: {
           type: 'object',
           required: ['refreshToken'],
-          properties: {
-            refreshToken: { type: 'string' },
-          },
+          properties: { refreshToken: { type: 'string' } },
         },
         LogoutRequest: {
           type: 'object',
           required: ['refreshToken'],
-          properties: {
-            refreshToken: { type: 'string' },
-          },
+          properties: { refreshToken: { type: 'string' } },
         },
-
-        // ===== Apostas =====
         ApostaCreateRequest: {
           type: 'object',
           required: ['tipo_jogo', 'valor_apostado'],
@@ -95,14 +101,10 @@ const options = {
             criado_em: { type: 'string', format: 'date-time' },
           },
         },
-
-        // ===== Saques =====
         SaqueCreateRequest: {
           type: 'object',
           required: ['valor'],
-          properties: {
-            valor: { type: 'number', example: 50.0 },
-          },
+          properties: { valor: { type: 'number', example: 50.0 } },
         },
         Saque: {
           type: 'object',
@@ -119,8 +121,6 @@ const options = {
             updated_at: { type: 'string', format: 'date-time' },
           },
         },
-
-        // ===== Financeiro =====
         Saldo: {
           type: 'object',
           properties: {
@@ -132,11 +132,7 @@ const options = {
         MovimentoFinanceiro: {
           type: 'object',
           properties: {
-            tipo: {
-              type: 'string',
-              example: 'deposito',
-              description: 'deposito | saque | aposta | credito | etc.',
-            },
+            tipo: { type: 'string', example: 'deposito' },
             valor: { type: 'number', example: 100.0 },
             descricao: { type: 'string', example: 'Depósito manual' },
             criado_em: { type: 'string', format: 'date-time' },
@@ -144,17 +140,11 @@ const options = {
             saldo_depois: { type: 'number', example: 150.0 },
           },
         },
-
-        // ===== Erro Padrão =====
         ErrorResponse: {
           type: 'object',
           properties: {
             erro: { type: 'string', example: 'Mensagem do erro.' },
-            details: {
-              type: 'object',
-              additionalProperties: true,
-              nullable: true,
-            },
+            details: { type: 'object', additionalProperties: true, nullable: true },
             stack: { type: 'string', nullable: true },
           },
         },
@@ -162,8 +152,8 @@ const options = {
     },
   },
   apis: [
-    './src/routes/*.js',        // anotações nas rotas
-    './src/controllers/*.js',   // se quiser documentar direto nos controllers
+    './src/routes/*.js',
+    './src/controllers/*.js',
   ],
 };
 
