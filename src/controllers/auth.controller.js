@@ -16,7 +16,7 @@ const s = (v) => (v ?? '').toString().trim();
  * POST /api/auth/signup
  * body: { nome, usuario, senha }
  * resp: { accessToken, refreshToken, usuario, ... }
- * - cria usuário ativo com funcao 'USER' (nunca ADMIN)
+ * - cria usuário ativo (nunca ADMIN)
  * - garante unicidade de usuario
  * - cria registro em saldos (0)
  * =======================================================*/
@@ -31,8 +31,7 @@ export const signupUsuario = async (req, res) => {
       .json({ erro: 'Nome, usuário e senha são obrigatórios.' });
   }
 
-  // aqui seguimos o padrão que você vem usando: usuario É um e-mail,
-  // só que armazenado na coluna "usuario"
+  // usuario = e-mail de login (padrão que você usa)
   if (!/\S+@\S+\.\S+/.test(rawUsuario)) {
     return res
       .status(400)
@@ -65,11 +64,12 @@ export const signupUsuario = async (req, res) => {
     // 2) hash da senha
     const senha_hash = await bcrypt.hash(senha, 10);
 
-    // 3) cria usuário (sempre USER e ativo) – sem coluna email
+    // 3) cria usuário
+    // ⚠️ IMPORTANTE: NÃO inserir valor em "funcao" porque é coluna gerada
     const { rows: urows } = await db.query(
       `INSERT INTO public.usuarios
-         (usuario, nome, funcao, senha_hash, ativo, criado_em)
-       VALUES ($1, $2, 'USER', $3, TRUE, NOW())
+         (usuario, nome, senha_hash, ativo, criado_em)
+       VALUES ($1, $2, $3, TRUE, NOW())
        RETURNING id, usuario, nome, funcao, ativo`,
       [usuario, nome, senha_hash]
     );
@@ -88,7 +88,7 @@ export const signupUsuario = async (req, res) => {
       id: user.id,
       usuario: user.usuario,
       nome: user.nome,
-      funcao_user_role: user.funcao, // 'USER'
+      funcao_user_role: user.funcao, // vem da coluna gerada
     };
     const accessToken = generateAccessToken(payload);
     const refreshToken = generateRefreshToken({ id: user.id });
@@ -119,8 +119,8 @@ export const signupUsuario = async (req, res) => {
         id: user.id,
         nome: user.nome,
         usuario: user.usuario,
-        funcao: user.funcao, // USER
-        email: null, // mantemos campo para compat, mas sempre null (não há coluna)
+        funcao: user.funcao, // USER / padrão que o banco gerar
+        email: null, // não temos coluna email
         ativo: user.ativo,
       },
     });
@@ -147,7 +147,7 @@ export const loginUsuario = async (req, res) => {
   }
 
   try {
-    // Busca APENAS por usuario (coluna "usuario"), sem usar coluna email
+    // Busca por usuario (coluna "usuario"), sem usar coluna email
     const result = await db.query(
       `SELECT id, usuario, nome, funcao, senha_hash, cpf, telefone, ativo
          FROM usuarios
@@ -207,7 +207,7 @@ export const loginUsuario = async (req, res) => {
         funcao: user.funcao,
         cpf: user.cpf,
         telefone: user.telefone,
-        email: null, // não temos coluna email, devolvemos null por padrão
+        email: null,
       },
     });
   } catch (error) {
