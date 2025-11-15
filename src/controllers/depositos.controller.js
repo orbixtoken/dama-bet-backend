@@ -10,20 +10,37 @@ function gerarRef(n = 7) {
 }
 
 async function getPixChaveCasa() {
-  // 1) .env
-  if (process.env.PIX_CHAVE_CASA && String(process.env.PIX_CHAVE_CASA).trim()) {
-    return String(process.env.PIX_CHAVE_CASA).trim();
+  // 1) .env – aceita PIX_CHAVE_CASA ou PIX_CHAVE
+  const envCandidates = [
+    process.env.PIX_CHAVE_CASA,
+    process.env.PIX_CHAVE,
+  ];
+
+  for (const v of envCandidates) {
+    if (v && String(v).trim()) {
+      return String(v).trim();
+    }
   }
-  // 2) tabela config_kv (opcional)
+
+  // 2) tabela config_kv (opcional) – aceita PIX_CHAVE_CASA ou PIX_CHAVE, case-insensitive
   try {
     const { rows } = await db.query(
-      `SELECT valor FROM public.config_kv WHERE chave = 'pix_chave_casa' LIMIT 1`
+      `
+      SELECT valor
+        FROM public.config_kv
+       WHERE LOWER(chave) IN ('pix_chave_casa', 'pix_chave')
+       ORDER BY chave
+       LIMIT 1
+      `,
     );
-    if (rows?.length && rows[0].valor) return String(rows[0].valor).trim();
+    if (rows?.length && rows[0].valor) {
+      return String(rows[0].valor).trim();
+    }
   } catch (e) {
-    // se a tabela não existir, só ignore
+    // se a tabela não existir ou coluna não existir, só ignore
     if (!['42P01', '42703'].includes(e?.code)) throw e;
   }
+
   return null;
 }
 
@@ -127,11 +144,11 @@ export async function listarDepositosAdmin(req, res) {
     const params = [];
     let i = 1;
 
-    if (status)      { where.push(`d.status = $${i++}`);                 params.push(String(status)); }
-    if (usuario_id)  { where.push(`d.usuario_id = $${i++}`);             params.push(Number(usuario_id)); }
-    if (ref)         { where.push(`d.codigo_ref ILIKE $${i++}`);         params.push(`%${String(ref)}%`); }
+    if (status)      { where.push(`d.status = $${i++}`);                   params.push(String(status)); }
+    if (usuario_id)  { where.push(`d.usuario_id = $${i++}`);               params.push(Number(usuario_id)); }
+    if (ref)         { where.push(`d.codigo_ref ILIKE $${i++}`);           params.push(`%${String(ref)}%`); }
     if (from)        { where.push(`d.created_at >= $${i++}::timestamptz`); params.push(new Date(from).toISOString()); }
-    if (to)          { where.push(`d.created_at <= $${i++}::timestamptz`);   params.push(new Date(to).toISOString()); }
+    if (to)          { where.push(`d.created_at <= $${i++}::timestamptz`); params.push(new Date(to).toISOString()); }
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
