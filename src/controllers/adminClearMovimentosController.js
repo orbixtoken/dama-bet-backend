@@ -1,10 +1,6 @@
-// controllers/adminClearMovimentosController.js
-import db from '../models/db.js';
+// src/controllers/adminClearMovimentosController.js
+import db from '../models/db.js'; // ajuste se seu util DB estiver em outro caminho
 
-/**
- * POST /api/admin/financeiro/movimentos/clear
- * body: { q, tipo, from, to }
- */
 export async function clearMovimentos(req, res) {
   try {
     const user = req.user || {};
@@ -12,7 +8,6 @@ export async function clearMovimentos(req, res) {
 
     const { q, tipo, from, to } = req.body ?? {};
 
-    // construir WHERE
     const whereParts = ["removed = false"];
     const values = [];
     let idx = 1;
@@ -40,14 +35,11 @@ export async function clearMovimentos(req, res) {
 
     const whereSql = whereParts.length ? `WHERE ${whereParts.join(" AND ")}` : "";
 
-    // usar client do pool
+    // pega client do pool (suporta tanto pg Pool quanto objeto db já conectado)
     const client = await (db.connect ? db.connect() : Promise.resolve(db));
-    let released = false;
     try {
-      // Iniciar transação
       await client.query("BEGIN");
 
-      // Seleciona ids (proteção FOR UPDATE)
       const selectSql = `SELECT id FROM financeiro_movimentos ${whereSql} FOR UPDATE`;
       const selectRes = await client.query(selectSql, values);
       const ids = selectRes.rows.map((r) => r.id);
@@ -57,7 +49,7 @@ export async function clearMovimentos(req, res) {
       }
 
       const now = new Date().toISOString();
-      // Atualiza por array de ids — se id não for uuid, ajuste o cast
+      // casting ids para text[] funciona para uuid e int quando convertidos para string
       const updateSql = `UPDATE financeiro_movimentos
         SET removed = true, removed_at = $${idx}, removed_by = $${idx + 1}
         WHERE id = ANY($${idx + 2}::text[])`;
@@ -66,16 +58,12 @@ export async function clearMovimentos(req, res) {
       await client.query(updateSql, updateVals);
       await client.query("COMMIT");
 
-      // retornar contagem e ids (opcional)
       return res.json({ removedCount: ids.length, ids });
     } catch (err) {
-      try { await client.query("ROLLBACK"); } catch (_) {}
+      try { await client.query("ROLLBACK"); } catch (__) {}
       throw err;
     } finally {
-      if (client.release) {
-        client.release();
-        released = true;
-      }
+      if (client.release) client.release();
     }
   } catch (err) {
     console.error('clearMovimentos error', err);
