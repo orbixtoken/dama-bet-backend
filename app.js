@@ -21,6 +21,8 @@ import pfSeedsRoutes from './src/routes/pfseeds.routes.js';
 import cassinoRoutes from './src/routes/cassino.routes.js';
 import cassinoConfigRoutes from './src/routes/cassino.config.routes.js';
 import pspRoutes from './src/routes/psp.routes.js';
+import clearMovimentosRouter from './src/routes/clearMovimentos.js';
+
 
 // ATENÇÃO: este router deve declarar caminhos relativos ("/me", "/history", "/claim-weekly")
 import referralRoutes from './src/routes/referral.routes.js';
@@ -124,6 +126,7 @@ app.use('/api/transacoes-externas', transacoesExternasRoutes);
 app.use('/api/reset-senha', resetSenhaRoutes);
 app.use('/api/saldo', saldoRoutes);
 app.use('/api/saques', saqueRoutes);
+app.use('/api/admin', clearMovimentosRouter); // ou ajuste para como monta suas rotas
 
 // Aqui o prefixo é /api/referrals.
 // Portanto, dentro do arquivo referral.routes.js os paths devem ser:
