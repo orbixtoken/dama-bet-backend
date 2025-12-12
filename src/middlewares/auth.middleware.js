@@ -10,16 +10,13 @@ const normalizeRole = (role) =>
 /** Converte qualquer entrada em uma LISTA de roles normalizadas */
 const toRoleList = (input) => {
   if (!input && input !== 0) return [];
-  // Array: achata e normaliza
   if (Array.isArray(input)) {
     return input.flat().map(normalizeRole).filter(Boolean);
   }
-  // String: pode conter vírgulas
   const s = String(input);
   if (s.includes(',')) {
     return s.split(',').map(normalizeRole).filter(Boolean);
   }
-  // Único valor
   return [normalizeRole(s)].filter(Boolean);
 };
 
@@ -37,7 +34,6 @@ export const autenticarToken = (req, res, next) => {
     if (parts.length === 2 && /^Bearer$/i.test(parts[0])) {
       token = parts[1];
     } else if (parts.length === 1) {
-      // tolera token cru (útil em alguns clientes / testes)
       token = parts[0];
     }
   }
@@ -49,11 +45,18 @@ export const autenticarToken = (req, res, next) => {
   try {
     const decoded = verificarToken(token);
 
-    // Compat + campos úteis
     req.usuario = decoded;
     req.user = decoded;
     req.userId = decoded.id;
-    req.role = normalizeRole(decoded.funcao_user_role || decoded.funcao || decoded.role);
+
+    // Normaliza role de várias possibilidades e usa fallback 'USUARIO'
+    const rawRole =
+      decoded.funcao_user_role ||
+      decoded.funcao ||
+      decoded.role ||
+      'USUARIO';
+
+    req.role = normalizeRole(rawRole);
 
     return next();
   } catch (err) {
@@ -71,16 +74,13 @@ export const autenticarToken = (req, res, next) => {
  *   autorizarRoles('ADMIN,MASTER')
  */
 export const autorizarRoles = (...funcoesPermitidas) => {
-  // Constrói lista final de roles permitidas, única e normalizada
   let allowed = [];
   for (const arg of funcoesPermitidas) {
     allowed = allowed.concat(toRoleList(arg));
   }
-  // remove duplicatas e vazios
   allowed = Array.from(new Set(allowed)).filter(Boolean);
 
   return (req, res, next) => {
-    // já normalizado no autenticarToken; fallback para campos brutos se necessário
     const roleAtual =
       req.role ||
       normalizeRole(
@@ -89,7 +89,8 @@ export const autorizarRoles = (...funcoesPermitidas) => {
         req.usuario?.funcao ||
         req.user?.funcao ||
         req.usuario?.role ||
-        req.user?.role
+        req.user?.role ||
+        'USUARIO'
       );
 
     if (!roleAtual) {
@@ -100,7 +101,7 @@ export const autorizarRoles = (...funcoesPermitidas) => {
       return res.status(403).json({
         erro: 'Acesso negado. Permissão insuficiente.',
         roleAtual,
-        permitido: allowed, // ex.: ["ADMIN","MASTER"]
+        permitido: allowed,
       });
     }
 
@@ -108,4 +109,10 @@ export const autorizarRoles = (...funcoesPermitidas) => {
   };
 };
 
-export default { autenticarToken, autorizarRoles };
+/**
+ * Middleware pronto para rotas apenas para ADMIN
+ */
+export const ensureAdmin = autorizarRoles('ADMIN');
+
+// Export padrão para compatibilidade
+export default { autenticarToken, autorizarRoles, ensureAdmin };
